@@ -1,0 +1,21 @@
+[package]
+name = "stracer"
+version = "0.1.0"
+authors = ["Lix Wei <w_weilix@hotmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+structopt = "*"
+# nix = "*"
+# libc = "*"
+byteorder = "*"
+log = "*"
+env_logger = "*"
+nix = "0.10"
+libc = "0.2"
+# structopt = "0.2"
+# byteorder = "1"
+# log = "0.4"
+# env_logger = "0.5"
