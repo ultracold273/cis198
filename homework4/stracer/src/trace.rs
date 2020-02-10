@@ -7,6 +7,7 @@ use log::info;
 use nix::sys::{wait, ptrace, signal};
 use nix::unistd::*;
 use libc::{c_void, user_regs_struct};
+use super::TraceOption;
 
 const ADDRESS_LOWER_BOUND: i64 = 10000;
 const DEBUG_PTRACE_EVENT: [&str; 7] = [
@@ -34,27 +35,42 @@ pub fn trace_posthook(regs: &user_regs_struct) -> String {
     }
 }
 
-pub fn trace(prog: &CString, args: &[CString]) -> nix::Result<()> {
+pub fn trace_print(pid: Pid, line: &Vec<String>, topt: &TraceOption) {
+    let idx = line.first().unwrap().find('(').unwrap();
+    let name = &line.first().unwrap()[..idx].to_string();
+    match topt {
+        TraceOption::Ignore(ref v) => {
+            if !v.contains(name) {
+                println!("[{}]: {}", pid, line.join(" = "));
+            }
+        },
+        TraceOption::Trace(ref v) => {
+            if v.contains(name) {
+                println!("[{}]: {}", pid, line.join(" = "));
+            }
+        },
+    }
+}
+
+pub fn trace(prog: &CString, args: &[CString], topt: TraceOption) -> nix::Result<()> {
     match fork()? {
         ForkResult::Parent { child, .. } => {
             wait::waitpid(child, None)?;
             util::ptrace_set_options(child)?;
             ptrace::syscall(child)?;
 
-            // let mut line: Vec<String> = vec![];
             let mut live_process = HashSet::new();
             live_process.insert(child);
             let mut proc_hook = HashMap::new();
             proc_hook.insert(child, (true, Vec::<String>::new()));
             loop {
-                // let actual_pid = match wait::waitpid(child, None)? {
                 let actual_pid = match wait::wait()? {
                     wait::WaitStatus::Exited(pid, code) => {
                         info!("[{}] Process exit normally with code {}", pid, code);
                         let (_, line) = proc_hook.get_mut(&pid).unwrap();
                         line.push("Process finished!".to_string());
 
-                        println!("[{}]: {}", pid, line.join(" = "));
+                        trace_print(pid, &line, &topt);
                         line.clear();
                         live_process.remove(&pid);
                         if live_process.len() == 0 { break }
@@ -79,7 +95,7 @@ pub fn trace(prog: &CString, args: &[CString]) -> nix::Result<()> {
                         } else {
                             line.push(trace_posthook(&regs));
                         
-                            println!("[{}]: {}", pid, line.join(" = "));
+                            trace_print(pid, &line, &topt);
                             line.clear();
                         }
                         *prehook = !*prehook;

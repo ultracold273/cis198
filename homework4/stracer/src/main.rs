@@ -9,6 +9,12 @@ use args::Opt;
 use trace::*;
 use std::ffi::CString;
 
+#[derive(Debug)]
+pub enum TraceOption {
+    Ignore(Vec<String>),
+    Trace(Vec<String>),
+}
+
 fn main() {
     env_logger::init();
     let mut opt = Opt::from_args();
@@ -19,5 +25,12 @@ fn main() {
     let exe_args = opt.exe_args.iter()
                                .map(|s| CString::new(s.as_str()).unwrap())
                                .collect::<Vec<CString>>();
-    trace(&exe_c, &exe_args).unwrap();
+    let topt = if let Some(v) = opt.dont_trace {
+        TraceOption::Ignore(v)
+    } else if let Some(v) = opt.to_trace {
+        TraceOption::Trace(v)
+    } else {
+        panic!("Trace option error");
+    };
+    trace(&exe_c, &exe_args, topt).unwrap();
 }
