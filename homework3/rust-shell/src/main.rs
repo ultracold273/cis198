@@ -4,9 +4,10 @@ use std::fmt;
 use raw_terminal::RawTerminal;
 
 use nix::unistd::execvp;
-use nix::unistd::{fork, ForkResult, dup2};
+use nix::unistd::{fork, ForkResult, dup2, pipe};
 use std::ffi::{CString, CStr};
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::AsRawFd;
+use std::io::prelude::*;
 
 const PROMT: &str = "> ";
 // const PATH: &str = "PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
@@ -70,39 +71,58 @@ fn parse_cmdline(cmd: String) -> Result<CommandLine, ParseError> {
     Ok(cmdline)
 }
 
-fn exec(cmd: &CommandLine) {
-    let fres = fork().unwrap();
-    match fres {
-        ForkResult::Parent { child, .. } => {
-            nix::sys::wait::waitpid(child, None).unwrap();
+// fn make_out_term() -> Fn
+
+fn exec(cmd: &CommandLine, term: &mut RawTerminal) -> nix::Result<()> {
+    let (fdr, fdw) = pipe()?;
+    match fork()? {
+        ForkResult::Parent { .. } => {
+            nix::unistd::close(fdw)?;
+            let mut buf = [0u8; 128];
+            if cmd.redir_fp.is_none() {
+                while let Ok(rdsize) = nix::unistd::read(fdr, &mut buf) {
+                    if rdsize == 0 { break }
+                    let s = std::str::from_utf8(&buf[..rdsize]).unwrap();
+                    term.write(s);
+                }
+            } else {
+                let path = cmd.redir_fp.as_ref();
+                let mut fd = std::fs::File::create(path.unwrap()).unwrap();
+                while let Ok(rdsize) = nix::unistd::read(fdr, &mut buf) {
+                    if rdsize == 0 { break }
+                    fd.write(&buf).unwrap();
+                }
+            }
+            nix::unistd::close(fdr)?;
         },
         ForkResult::Child => {
             // Actually use pipe to redirect output
             // If not with a file, redirect to the parent program to write
-            // the terminal
-            let mut rawfd: Option<RawFd> = None;
-            if let Some(ref path) = cmd.redir_fp {
-                let fd = std::fs::File::create(path).unwrap();
-                rawfd = Some(fd.as_raw_fd());
-                dup2(rawfd.unwrap(), std::io::stdout().as_raw_fd()).unwrap();
-            }
+            // the terminal??
+            // let mut (rfd1, rfd2) = pipe();
+            // let mut rawfd: Option<RawFd> = None;
+            // if let Some(ref path) = cmd.redir_fp {
+            //     let fd = std::fs::File::create(path).unwrap();
+            //     rawfd = Some(fd.as_raw_fd());
+            //     dup2(rawfd.unwrap(), std::io::stdout().as_raw_fd()).unwrap();
+            // }
+            nix::unistd::close(fdr)?;
+            dup2(fdw, std::io::stdout().as_raw_fd())?;
+            nix::unistd::close(fdw)?;
             let ecmd = CString::new(cmd.command.as_ref().unwrap().clone()).unwrap();
             let mut eargs = cmd.args.as_ref().unwrap().iter()
                                 .map(|s| CString::new(s.clone()).unwrap())
                                 .collect::<Vec<CString>>();
             eargs.insert(0, ecmd.clone());
             let args = eargs.iter().map(|cs| cs.as_c_str()).collect::<Vec<&CStr>>();
-            execvp(&ecmd, &args).unwrap();
-            if rawfd.is_some() {
-                nix::unistd::close(rawfd.unwrap()).unwrap();
-            }
+            execvp(&ecmd, &args)?;
+            // if rawfd.is_some() {
+                // nix::unistd::close(rawfd.unwrap()).unwrap();
+            // }
         },
     }
+    Ok(())
 }
-
-// fn chdir() -> Result<()> {
-//     Ok(())
-// }
 
 fn main() {
     let mut terminal = raw_terminal::RawTerminal::new();
@@ -127,7 +147,7 @@ fn main() {
             }
         }
 
-        exec(&cmdl);
+        exec(&cmdl, &mut terminal).unwrap();
         terminal.move_to_beginning_of_line();
     }
 }

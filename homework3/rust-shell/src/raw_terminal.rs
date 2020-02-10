@@ -28,7 +28,10 @@ impl RawTerminal {
     /// Write a string to the terminal.
     pub fn write(&mut self, msg: &str) { 
         // self.stdout.write_all(msg.as_bytes()).unwrap();
-        write!(self.stdout, "{}", msg).unwrap();
+        // write!(self.stdout, "{}", msg).unwrap();
+        let s = msg.to_string();
+        let ns = s.replace("\n", "\r\n");
+        self.stdout.write(ns.as_bytes()).unwrap();
         self.flush();
     }
 
